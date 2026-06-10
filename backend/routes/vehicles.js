@@ -271,6 +271,88 @@ router.post("/calculate-all", (req, res) => {
   res.json({ calculated: results.length, results });
 });
 
+router.get("/weight-presets", (req, res) => {
+  const presets = db
+    .prepare("SELECT * FROM weight_presets ORDER BY created_at DESC")
+    .all();
+  res.json(presets);
+});
+
+router.post("/weight-presets", (req, res) => {
+  const { name, weight, evasion, energy } = req.body;
+
+  if (!name || typeof name !== "string" || !name.trim()) {
+    return res.status(400).json({ error: "方案名不能为空" });
+  }
+
+  const trimmedName = name.trim();
+
+  const normalized = validateWeights({
+    weight: weight !== undefined ? Number(weight) : undefined,
+    evasion: evasion !== undefined ? Number(evasion) : undefined,
+    energy: energy !== undefined ? Number(energy) : undefined,
+  });
+
+  const existing = db
+    .prepare("SELECT id FROM weight_presets WHERE name = ?")
+    .get(trimmedName);
+  if (existing) {
+    return res.status(400).json({ error: "方案名已存在" });
+  }
+
+  try {
+    const result = db
+      .prepare(
+        `INSERT INTO weight_presets (name, weight, evasion, energy) VALUES (?, ?, ?, ?)`,
+      )
+      .run(
+        trimmedName,
+        normalized.weight,
+        normalized.evasion,
+        normalized.energy,
+      );
+
+    res.status(201).json({
+      id: result.lastInsertRowid,
+      name: trimmedName,
+      weight: normalized.weight,
+      evasion: normalized.evasion,
+      energy: normalized.energy,
+    });
+  } catch (e) {
+    if (e.message && e.message.includes("UNIQUE")) {
+      return res.status(400).json({ error: "方案名已存在" });
+    }
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete("/weight-presets/:id", (req, res) => {
+  const preset = db
+    .prepare("SELECT id FROM weight_presets WHERE id = ?")
+    .get(req.params.id);
+  if (!preset) {
+    return res.status(404).json({ error: "方案不存在" });
+  }
+  db.prepare("DELETE FROM weight_presets WHERE id = ?").run(req.params.id);
+  res.json({ deleted: true });
+});
+
+router.get("/weight-presets/:id/tradeoff", (req, res) => {
+  const preset = db
+    .prepare("SELECT * FROM weight_presets WHERE id = ?")
+    .get(req.params.id);
+  if (!preset) {
+    return res.status(404).json({ error: "方案不存在" });
+  }
+  const data = getTradeoffData({
+    weight: preset.weight,
+    evasion: preset.evasion,
+    energy: preset.energy,
+  });
+  res.json({ ...data, preset });
+});
+
 router.get("/:id", (req, res) => {
   const vehicle = db
     .prepare("SELECT * FROM vehicles WHERE id = ?")
