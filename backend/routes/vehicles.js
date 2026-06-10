@@ -116,6 +116,83 @@ router.post("/recalculate-with-weights", (req, res) => {
   res.json(result);
 });
 
+router.get("/schemes", (req, res) => {
+  const schemes = db
+    .prepare("SELECT * FROM weight_schemes ORDER BY created_at DESC")
+    .all();
+  res.json(schemes);
+});
+
+router.post("/schemes", (req, res) => {
+  const { name, weight, evasion, energy } = req.body;
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: "方案名称不能为空" });
+  }
+
+  const trimmedName = name.trim();
+
+  const existing = db
+    .prepare("SELECT id FROM weight_schemes WHERE name = ?")
+    .get(trimmedName);
+  if (existing) {
+    return res.status(400).json({ error: "方案名称已存在" });
+  }
+
+  const normalized = validateWeights({
+    weight: weight !== undefined ? Number(weight) : undefined,
+    evasion: evasion !== undefined ? Number(evasion) : undefined,
+    energy: energy !== undefined ? Number(energy) : undefined,
+  });
+
+  const stmt = db.prepare(`
+    INSERT INTO weight_schemes (name, weight, evasion, energy)
+    VALUES (?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    trimmedName,
+    normalized.weight,
+    normalized.evasion,
+    normalized.energy,
+  );
+
+  res.status(201).json({
+    id: result.lastInsertRowid,
+    name: trimmedName,
+    ...normalized,
+  });
+});
+
+router.post("/schemes/:id/recalculate", (req, res) => {
+  const scheme = db
+    .prepare("SELECT * FROM weight_schemes WHERE id = ?")
+    .get(req.params.id);
+  if (!scheme) {
+    return res.status(404).json({ error: "方案不存在" });
+  }
+
+  const customWeights = {
+    weight: scheme.weight,
+    evasion: scheme.evasion,
+    energy: scheme.energy,
+  };
+
+  const data = getTradeoffData(customWeights);
+  res.json(data);
+});
+
+router.delete("/schemes/:id", (req, res) => {
+  const scheme = db
+    .prepare("SELECT * FROM weight_schemes WHERE id = ?")
+    .get(req.params.id);
+  if (!scheme) {
+    return res.status(404).json({ error: "方案不存在" });
+  }
+
+  db.prepare("DELETE FROM weight_schemes WHERE id = ?").run(req.params.id);
+  res.json({ deleted: true });
+});
+
 router.post("/tradeoff-with-weights", (req, res) => {
   const { weight, evasion, energy } = req.body;
 
