@@ -541,6 +541,111 @@ function getDefaultWeights() {
   return DEFAULT_WEIGHTS;
 }
 
+function getAllWeightSchemes() {
+  const schemes = db
+    .prepare(
+      `
+    SELECT * FROM weight_schemes
+    ORDER BY created_at DESC
+  `,
+    )
+    .all();
+  return schemes.map((s) => ({
+    id: s.id,
+    name: s.name,
+    weight: s.weight_weight,
+    evasion: s.weight_evasion,
+    energy: s.weight_energy,
+    created_at: s.created_at,
+    updated_at: s.updated_at,
+  }));
+}
+
+function getWeightSchemeById(id) {
+  const scheme = db
+    .prepare("SELECT * FROM weight_schemes WHERE id = ?")
+    .get(id);
+  if (!scheme) return null;
+  return {
+    id: scheme.id,
+    name: scheme.name,
+    weight: scheme.weight_weight,
+    evasion: scheme.weight_evasion,
+    energy: scheme.weight_energy,
+    created_at: scheme.created_at,
+    updated_at: scheme.updated_at,
+  };
+}
+
+function createWeightScheme(name, weights) {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    return { error: "方案名称不能为空" };
+  }
+
+  const existing = db
+    .prepare("SELECT id FROM weight_schemes WHERE name = ?")
+    .get(trimmedName);
+  if (existing) {
+    return { error: "方案名称已存在" };
+  }
+
+  const normalized = validateWeights(weights);
+
+  const stmt = db.prepare(`
+    INSERT INTO weight_schemes (
+      name, weight_weight, weight_evasion, weight_energy
+    ) VALUES (?, ?, ?, ?)
+  `);
+
+  const result = stmt.run(
+    trimmedName,
+    normalized.weight,
+    normalized.evasion,
+    normalized.energy,
+  );
+
+  return {
+    id: result.lastInsertRowid,
+    name: trimmedName,
+    ...normalized,
+  };
+}
+
+function deleteWeightScheme(id) {
+  const scheme = db
+    .prepare("SELECT id FROM weight_schemes WHERE id = ?")
+    .get(id);
+  if (!scheme) {
+    return { error: "方案不存在" };
+  }
+
+  db.prepare("DELETE FROM weight_schemes WHERE id = ?").run(id);
+  return { deleted: true, id };
+}
+
+function getTradeoffDataByScheme(schemeId) {
+  const scheme = getWeightSchemeById(schemeId);
+  if (!scheme) {
+    return { error: "方案不存在" };
+  }
+
+  const customWeights = {
+    weight: scheme.weight,
+    evasion: scheme.evasion,
+    energy: scheme.energy,
+  };
+
+  const data = getTradeoffData(customWeights);
+  return {
+    ...data,
+    scheme: {
+      id: scheme.id,
+      name: scheme.name,
+    },
+  };
+}
+
 module.exports = {
   getWeightClass,
   calculateScores,
@@ -561,4 +666,9 @@ module.exports = {
   checkDuplicateVehicle,
   normalize,
   getMinMaxValues,
+  getAllWeightSchemes,
+  getWeightSchemeById,
+  createWeightScheme,
+  deleteWeightScheme,
+  getTradeoffDataByScheme,
 };
