@@ -1,17 +1,44 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { vehiclesAPI } from '../api';
+import WeightSlider from '../components/WeightSlider';
+
+const DEFAULT_WEIGHTS = { weight: 0.35, evasion: 0.4, energy: 0.25 };
 
 function TradeoffChart() {
   const [tradeoffData, setTradeoffData] = useState(null);
   const [statistics, setStatistics] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [weights, setWeights] = useState(DEFAULT_WEIGHTS);
+  const [weightsApplied, setWeightsApplied] = useState(DEFAULT_WEIGHTS);
+  const [presets, setPresets] = useState([]);
+  const [selectedPresetId, setSelectedPresetId] = useState('');
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [newPresetName, setNewPresetName] = useState('');
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
+  const debounceRef = useRef(null);
 
   useEffect(() => {
-    loadData();
+    loadInitialData();
+    loadPresets();
   }, []);
 
-  const loadData = async () => {
+  useEffect(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+    debounceRef.current = setTimeout(() => {
+      recalculateTradeoffData();
+    }, 300);
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, [weights]);
+
+  const loadInitialData = async () => {
     setLoading(true);
     try {
       const [tradeoffRes, statsRes] = await Promise.all([
@@ -24,6 +51,105 @@ function TradeoffChart() {
       console.error('加载数据失败:', error);
     }
     setLoading(false);
+  };
+
+  const loadPresets = async () => {
+    try {
+      const res = await vehiclesAPI.getWeightPresets();
+      setPresets(res.data);
+    } catch (error) {
+      console.error('加载方案列表失败:', error);
+    }
+  };
+
+  const recalculateTradeoffData = async () => {
+    setRecalculating(true);
+    try {
+      const res = await vehiclesAPI.getTradeoffWithWeights(weights);
+      setTradeoffData(res.data);
+      setWeightsApplied(res.data.weights_applied);
+    } catch (error) {
+      console.error('权重计算失败:', error);
+    }
+    setRecalculating(false);
+  };
+
+  const handleWeightsChange = (newWeights) => {
+    setWeights(newWeights);
+    setSelectedPresetId('');
+  };
+
+  const handleResetWeights = () => {
+    setWeights(DEFAULT_WEIGHTS);
+    setSelectedPresetId('');
+  };
+
+  const handlePresetChange = async (presetId) => {
+    if (!presetId) {
+      setSelectedPresetId('');
+      setWeights(DEFAULT_WEIGHTS);
+      return;
+    }
+
+    setSelectedPresetId(presetId);
+    setLoading(true);
+    try {
+      const res = await vehiclesAPI.getTradeoffByPreset(presetId);
+      setTradeoffData(res.data);
+      setWeights(res.data.weights_applied);
+      setWeightsApplied(res.data.weights_applied);
+
+      const preset = presets.find(p => p.id === parseInt(presetId));
+      if (preset) {
+        setWeights({ weight: preset.weight, evasion: preset.evasion, energy: preset.energy });
+      }
+    } catch (error) {
+      console.error('加载方案数据失败:', error);
+      alert('加载方案失败');
+    }
+    setLoading(false);
+  };
+
+  const handleSavePreset = async () => {
+    if (!newPresetName.trim()) {
+      alert('请输入方案名称');
+      return;
+    }
+
+    setSavingPreset(true);
+    try {
+      await vehiclesAPI.createWeightPreset({
+        name: newPresetName.trim(),
+        ...weightsApplied,
+      });
+      setShowSaveDialog(false);
+      setNewPresetName('');
+      await loadPresets();
+      alert('方案保存成功！');
+    } catch (error) {
+      console.error('保存方案失败:', error);
+      alert(error.response?.data?.error || '保存失败，请重试');
+    }
+    setSavingPreset(false);
+  };
+
+  const handleDeletePreset = async (presetId, e) => {
+    e.stopPropagation();
+    if (!confirm('确定要删除这个权重方案吗？')) {
+      return;
+    }
+
+    try {
+      await vehiclesAPI.deleteWeightPreset(presetId);
+      if (selectedPresetId === String(presetId)) {
+        setSelectedPresetId('');
+        setWeights(DEFAULT_WEIGHTS);
+      }
+      await loadPresets();
+    } catch (error) {
+      console.error('删除方案失败:', error);
+      alert('删除失败');
+    }
   };
 
   const getWeightScatterOption = () => {
@@ -273,6 +399,11 @@ function TradeoffChart() {
     };
   };
 
+  const isCustomWeights =
+    Math.abs(weightsApplied.weight - DEFAULT_WEIGHTS.weight) > 0.001 ||
+    Math.abs(weightsApplied.evasion - DEFAULT_WEIGHTS.evasion) > 0.001 ||
+    Math.abs(weightsApplied.energy - DEFAULT_WEIGHTS.energy) > 0.001;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -290,88 +421,254 @@ function TradeoffChart() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {statistics.map((stat, index) => (
-          <div
-            key={stat.weight_class}
-            className="bg-white rounded-xl shadow-sm border border-gray-200 p-5"
-          >
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-gray-900">{stat.weight_class}</h3>
-              <span className="text-xs text-gray-500">
-                {stat.min_weight}-{stat.max_weight}kg
-              </span>
-            </div>
-            <div className="text-2xl font-bold text-gray-900 mb-2">
-              {stat.vehicle_count} 款车型
-            </div>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-500">平均制动</span>
-                <span className="font-medium">{stat.avg_braking_distance} m</span>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="lg:col-span-1 space-y-4">
+          <WeightSlider
+            weights={weights}
+            onWeightsChange={handleWeightsChange}
+            onReset={handleResetWeights}
+          />
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+            <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <span>💾</span>
+              权重方案
+            </h3>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  选择方案
+                </label>
+                <select
+                  value={selectedPresetId}
+                  onChange={(e) => handlePresetChange(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                >
+                  <option value="">-- 默认权重 --</option>
+                  {presets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.name}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">平均能耗</span>
-                <span className="font-medium">{stat.avg_energy_consumption}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">平均权衡分</span>
-                <span className="font-medium text-blue-600">{stat.avg_total_score}</span>
-              </div>
+
+              <button
+                onClick={() => setShowSaveDialog(true)}
+                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center justify-center gap-2"
+              >
+                <span>💾</span>
+                把当前权重存成方案
+              </button>
+
+              {selectedPresetId && (
+                <button
+                  onClick={(e) => handleDeletePreset(parseInt(selectedPresetId), e)}
+                  className="w-full px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors text-sm font-medium"
+                >
+                  删除当前方案
+                </button>
+              )}
             </div>
+
+            {presets.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <p className="text-xs text-gray-500 mb-2">已保存的方案：</p>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {presets.map((preset) => (
+                    <div
+                      key={preset.id}
+                      className={`flex items-center justify-between text-xs p-2 rounded cursor-pointer hover:bg-gray-50 ${
+                        selectedPresetId === String(preset.id) ? 'bg-blue-50 text-blue-700' : 'text-gray-600'
+                      }`}
+                      onClick={() => handlePresetChange(String(preset.id))}
+                    >
+                      <span className="truncate font-medium">{preset.name}</span>
+                      <button
+                        onClick={(e) => handleDeletePreset(preset.id, e)}
+                        className="text-gray-400 hover:text-red-500 ml-2 flex-shrink-0"
+                        title="删除"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        ))}
-      </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">车重 vs 制动距离 散点图</h3>
-        <p className="text-sm text-gray-500 mb-4">
-          圆点大小代表能耗水平（越大能耗越高），颜色代表重量分档。理想车型应位于左上区域（轻且制动好）
-        </p>
-        <ReactECharts option={getWeightScatterOption()} style={{ height: 450 }} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">分档指标趋势</h3>
-          <p className="text-sm text-gray-500 mb-4">
-            各重量分档的平均制动、能耗、权衡分对比
-          </p>
-          <ReactECharts option={getClassTrendOption()} style={{ height: 350 }} />
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-100 p-4">
+            <h4 className="font-semibold text-gray-900 mb-2">💡 当前权重</h4>
+            <ul className="text-sm text-gray-600 space-y-1">
+              <li>
+                • <strong>轻量化</strong>：
+                {(weightsApplied.weight * 100).toFixed(0)}%
+              </li>
+              <li>
+                • <strong>避险能力</strong>：
+                {(weightsApplied.evasion * 100).toFixed(0)}%
+              </li>
+              <li>
+                • <strong>能耗经济</strong>：
+                {(weightsApplied.energy * 100).toFixed(0)}%
+              </li>
+            </ul>
+            {recalculating && (
+              <div className="mt-2 text-xs text-blue-600 animate-pulse">
+                ⏳ 正在重新计算...
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">综合得分分布</h3>
-          <p className="text-sm text-gray-500 mb-4">
-            按车重排序的车型三项得分曲线
-          </p>
-          <ReactECharts option={getScoreDistributionOption()} style={{ height: 350 }} />
+        <div className="lg:col-span-3 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {statistics.map((stat, index) => (
+              <div
+                key={stat.weight_class}
+                className="bg-white rounded-xl shadow-sm border border-gray-200 p-5"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-gray-900">{stat.weight_class}</h3>
+                  <span className="text-xs text-gray-500">
+                    {stat.min_weight}-{stat.max_weight}kg
+                  </span>
+                </div>
+                <div className="text-2xl font-bold text-gray-900 mb-2">
+                  {stat.vehicle_count} 款车型
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">平均制动</span>
+                    <span className="font-medium">{stat.avg_braking_distance} m</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">平均能耗</span>
+                    <span className="font-medium">{stat.avg_energy_consumption}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">平均权衡分</span>
+                    <span className="font-medium text-blue-600">{stat.avg_total_score}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-semibold text-gray-900">车重 vs 制动距离 散点图</h3>
+              {isCustomWeights && (
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                  {selectedPresetId ? `方案: ${presets.find(p => p.id === parseInt(selectedPresetId))?.name}` : '自定义权重'}
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              圆点大小代表能耗水平（越大能耗越高），颜色代表重量分档。理想车型应位于左上区域（轻且制动好）
+            </p>
+            <ReactECharts option={getWeightScatterOption()} style={{ height: 450 }} />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">分档指标趋势</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                各重量分档的平均制动、能耗、权衡分对比
+              </p>
+              <ReactECharts option={getClassTrendOption()} style={{ height: 350 }} />
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">综合得分分布</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                按车重排序的车型三项得分曲线
+              </p>
+              <ReactECharts option={getScoreDistributionOption()} style={{ height: 350 }} />
+            </div>
+          </div>
+
+          <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border border-amber-200 p-6">
+            <h3 className="font-semibold text-gray-900 mb-3">📊 数据洞察</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+              <div className="bg-white/60 rounded-lg p-4">
+                <div className="text-amber-600 font-medium mb-1">重量影响</div>
+                <p className="text-gray-600">
+                  车重每增加 500kg，平均制动距离增加约 1-2 米，百公里能耗增加约 3-5 个单位
+                </p>
+              </div>
+              <div className="bg-white/60 rounded-lg p-4">
+                <div className="text-green-600 font-medium mb-1">最佳区间</div>
+                <p className="text-gray-600">
+                  1500-1800kg 紧凑型车型在安全性和经济性之间取得最佳平衡，平均权衡分最高
+                </p>
+              </div>
+              <div className="bg-white/60 rounded-lg p-4">
+                <div className="text-blue-600 font-medium mb-1">技术红利</div>
+                <p className="text-gray-600">
+                  部分中大型车通过先进制动技术抵消了重量带来的负面影响，避险能力表现出色
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border border-amber-200 p-6">
-        <h3 className="font-semibold text-gray-900 mb-3">📊 数据洞察</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-          <div className="bg-white/60 rounded-lg p-4">
-            <div className="text-amber-600 font-medium mb-1">重量影响</div>
-            <p className="text-gray-600">
-              车重每增加 500kg，平均制动距离增加约 1-2 米，百公里能耗增加约 3-5 个单位
-            </p>
-          </div>
-          <div className="bg-white/60 rounded-lg p-4">
-            <div className="text-green-600 font-medium mb-1">最佳区间</div>
-            <p className="text-gray-600">
-              1500-1800kg 紧凑型车型在安全性和经济性之间取得最佳平衡，平均权衡分最高
-            </p>
-          </div>
-          <div className="bg-white/60 rounded-lg p-4">
-            <div className="text-blue-600 font-medium mb-1">技术红利</div>
-            <p className="text-gray-600">
-              部分中大型车通过先进制动技术抵消了重量带来的负面影响，避险能力表现出色
-            </p>
+      {showSaveDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">保存权重方案</h3>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                方案名称
+              </label>
+              <input
+                type="text"
+                value={newPresetName}
+                onChange={(e) => setNewPresetName(e.target.value)}
+                placeholder="例如：安全优先、均衡型、节能导向"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSavePreset();
+                  if (e.key === 'Escape') {
+                    setShowSaveDialog(false);
+                    setNewPresetName('');
+                  }
+                }}
+              />
+            </div>
+            <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+              <p className="text-xs text-gray-500 mb-2">当前权重配置：</p>
+              <div className="flex gap-4 text-sm">
+                <span>轻量化 <strong>{(weightsApplied.weight * 100).toFixed(0)}%</strong></span>
+                <span>避险 <strong>{(weightsApplied.evasion * 100).toFixed(0)}%</strong></span>
+                <span>能耗 <strong>{(weightsApplied.energy * 100).toFixed(0)}%</strong></span>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowSaveDialog(false);
+                  setNewPresetName('');
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSavePreset}
+                disabled={savingPreset}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {savingPreset ? '保存中...' : '保存方案'}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

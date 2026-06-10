@@ -56,10 +56,21 @@ function ensureTablesExist() {
       calculated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS weight_presets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      weight_value REAL NOT NULL,
+      evasion_value REAL NOT NULL,
+      energy_value REAL NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE INDEX IF NOT EXISTS idx_vehicles_status ON vehicles(status);
     CREATE INDEX IF NOT EXISTS idx_vehicles_class ON vehicles(vehicle_class);
     CREATE INDEX IF NOT EXISTS idx_vehicles_weight_class ON vehicles(weight_class);
     CREATE INDEX IF NOT EXISTS idx_vehicles_score ON vehicles(total_score);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_weight_presets_name ON weight_presets(name);
   `);
 
   const columnsToAdd = [

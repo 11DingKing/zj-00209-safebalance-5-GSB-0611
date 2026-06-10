@@ -1,8 +1,8 @@
-const fs = require('fs');
-const path = require('path');
-const db = require('../config/database');
+const fs = require("fs");
+const path = require("path");
+const db = require("../config/database");
 
-const dataDir = path.join(__dirname, '..', 'data');
+const dataDir = path.join(__dirname, "..", "data");
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
@@ -47,18 +47,34 @@ db.exec(`
     calculated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS weight_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    weight_value REAL NOT NULL,
+    evasion_value REAL NOT NULL,
+    energy_value REAL NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE INDEX IF NOT EXISTS idx_vehicles_status ON vehicles(status);
   CREATE INDEX IF NOT EXISTS idx_vehicles_class ON vehicles(vehicle_class);
   CREATE INDEX IF NOT EXISTS idx_vehicles_weight_class ON vehicles(weight_class);
   CREATE INDEX IF NOT EXISTS idx_vehicles_score ON vehicles(total_score);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_weight_presets_name ON weight_presets(name);
 `);
 
 const weightClasses = [
-  { name: '轻型车', min: 0, max: 1500, description: '整备质量 1500kg 以下' },
-  { name: '紧凑型', min: 1500, max: 1800, description: '整备质量 1500-1800kg' },
-  { name: '中型车', min: 1800, max: 2100, description: '整备质量 1800-2100kg' },
-  { name: '中大型', min: 2100, max: 2500, description: '整备质量 2100-2500kg' },
-  { name: '重型车', min: 2500, max: 10000, description: '整备质量 2500kg 以上' },
+  { name: "轻型车", min: 0, max: 1500, description: "整备质量 1500kg 以下" },
+  { name: "紧凑型", min: 1500, max: 1800, description: "整备质量 1500-1800kg" },
+  { name: "中型车", min: 1800, max: 2100, description: "整备质量 1800-2100kg" },
+  { name: "中大型", min: 2100, max: 2500, description: "整备质量 2100-2500kg" },
+  {
+    name: "重型车",
+    min: 2500,
+    max: 10000,
+    description: "整备质量 2500kg 以上",
+  },
 ];
 
 const insertClass = db.prepare(`
@@ -70,8 +86,8 @@ for (const wc of weightClasses) {
   insertClass.run(wc.name, wc.min, wc.max, wc.description);
 }
 
-console.log('数据库初始化完成！');
-console.log('重量分档已创建：');
+console.log("数据库初始化完成！");
+console.log("重量分档已创建：");
 for (const wc of weightClasses) {
   console.log(`  ${wc.name}: ${wc.min}-${wc.max}kg`);
 }
