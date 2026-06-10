@@ -541,6 +541,88 @@ function getDefaultWeights() {
   return DEFAULT_WEIGHTS;
 }
 
+function createWeightPreset(name, weights) {
+  if (!name || typeof name !== "string" || name.trim() === "") {
+    return { error: "方案名称不能为空" };
+  }
+  const trimmedName = name.trim();
+
+  const existing = db
+    .prepare("SELECT id FROM weight_presets WHERE name = ?")
+    .get(trimmedName);
+  if (existing) {
+    return { error: "方案名称已存在，请换一个名字" };
+  }
+
+  const normalized = validateWeights(weights);
+
+  const result = db
+    .prepare(
+      `
+    INSERT INTO weight_presets (name, weight_value, evasion_value, energy_value)
+    VALUES (?, ?, ?, ?)
+  `,
+    )
+    .run(trimmedName, normalized.weight, normalized.evasion, normalized.energy);
+
+  return {
+    id: result.lastInsertRowid,
+    name: trimmedName,
+    weight: normalized.weight,
+    evasion: normalized.evasion,
+    energy: normalized.energy,
+  };
+}
+
+function getAllWeightPresets() {
+  return db
+    .prepare(
+      `
+    SELECT id, name, weight_value as weight, evasion_value as evasion, energy_value as energy, created_at, updated_at
+    FROM weight_presets
+    ORDER BY created_at DESC
+  `,
+    )
+    .all();
+}
+
+function getWeightPresetById(id) {
+  return db
+    .prepare(
+      `
+    SELECT id, name, weight_value as weight, evasion_value as evasion, energy_value as energy, created_at, updated_at
+    FROM weight_presets
+    WHERE id = ?
+  `,
+    )
+    .get(id);
+}
+
+function deleteWeightPreset(id) {
+  const preset = getWeightPresetById(id);
+  if (!preset) {
+    return { error: "方案不存在" };
+  }
+
+  db.prepare("DELETE FROM weight_presets WHERE id = ?").run(id);
+  return { success: true, id };
+}
+
+function getTradeoffDataByPresetId(presetId) {
+  const preset = getWeightPresetById(presetId);
+  if (!preset) {
+    return { error: "方案不存在" };
+  }
+
+  const weights = {
+    weight: preset.weight,
+    evasion: preset.evasion,
+    energy: preset.energy,
+  };
+
+  return getTradeoffData(weights);
+}
+
 module.exports = {
   getWeightClass,
   calculateScores,
@@ -561,4 +643,9 @@ module.exports = {
   checkDuplicateVehicle,
   normalize,
   getMinMaxValues,
+  createWeightPreset,
+  getAllWeightPresets,
+  getWeightPresetById,
+  deleteWeightPreset,
+  getTradeoffDataByPresetId,
 };
