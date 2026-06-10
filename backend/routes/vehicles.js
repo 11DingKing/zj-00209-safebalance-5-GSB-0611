@@ -276,6 +276,53 @@ router.post("/calculate-all", (req, res) => {
   res.json({ calculated: results.length, results });
 });
 
+router.get("/weight-presets", (req, res) => {
+  const presets = getAllWeightPresets();
+  res.json(presets);
+});
+
+router.post("/weight-presets", (req, res) => {
+  const { name, weight, evasion, energy } = req.body;
+
+  const customWeights = {
+    weight: weight !== undefined ? Number(weight) : undefined,
+    evasion: evasion !== undefined ? Number(evasion) : undefined,
+    energy: energy !== undefined ? Number(energy) : undefined,
+  };
+
+  const result = createWeightPreset(name, customWeights);
+
+  if (result.error) {
+    return res.status(400).json({ error: result.error });
+  }
+
+  res.status(201).json(result);
+});
+
+router.get("/weight-presets/:id", (req, res) => {
+  const preset = getWeightPresetById(parseInt(req.params.id));
+  if (!preset) {
+    return res.status(404).json({ error: "方案不存在" });
+  }
+  res.json(preset);
+});
+
+router.get("/weight-presets/:id/tradeoff", (req, res) => {
+  const result = getTradeoffDataByPresetId(parseInt(req.params.id));
+  if (result.error) {
+    return res.status(404).json({ error: result.error });
+  }
+  res.json(result);
+});
+
+router.delete("/weight-presets/:id", (req, res) => {
+  const result = deleteWeightPreset(parseInt(req.params.id));
+  if (result.error) {
+    return res.status(404).json({ error: result.error });
+  }
+  res.json(result);
+});
+
 router.get("/:id", (req, res) => {
   const vehicle = db
     .prepare("SELECT * FROM vehicles WHERE id = ?")
@@ -427,53 +474,6 @@ router.delete("/:id", (req, res) => {
 
   db.prepare("DELETE FROM vehicles WHERE id = ?").run(req.params.id);
   res.json({ deleted: true });
-});
-
-router.get("/weight-presets", (req, res) => {
-  const presets = getAllWeightPresets();
-  res.json(presets);
-});
-
-router.post("/weight-presets", (req, res) => {
-  const { name, weight, evasion, energy } = req.body;
-
-  const customWeights = {
-    weight: weight !== undefined ? Number(weight) : undefined,
-    evasion: evasion !== undefined ? Number(evasion) : undefined,
-    energy: energy !== undefined ? Number(energy) : undefined,
-  };
-
-  const result = createWeightPreset(name, customWeights);
-
-  if (result.error) {
-    return res.status(400).json({ error: result.error });
-  }
-
-  res.status(201).json(result);
-});
-
-router.get("/weight-presets/:id", (req, res) => {
-  const preset = getWeightPresetById(parseInt(req.params.id));
-  if (!preset) {
-    return res.status(404).json({ error: "方案不存在" });
-  }
-  res.json(preset);
-});
-
-router.get("/weight-presets/:id/tradeoff", (req, res) => {
-  const result = getTradeoffDataByPresetId(parseInt(req.params.id));
-  if (result.error) {
-    return res.status(404).json({ error: result.error });
-  }
-  res.json(result);
-});
-
-router.delete("/weight-presets/:id", (req, res) => {
-  const result = deleteWeightPreset(parseInt(req.params.id));
-  if (result.error) {
-    return res.status(404).json({ error: result.error });
-  }
-  res.json(result);
 });
 
 module.exports = router;
