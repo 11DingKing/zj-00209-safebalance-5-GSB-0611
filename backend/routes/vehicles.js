@@ -15,6 +15,11 @@ const {
   getDefaultWeights,
   validateWeights,
   checkDuplicateVehicle,
+  createWeightScheme,
+  getWeightSchemes,
+  getWeightSchemeById,
+  deleteWeightScheme,
+  getTradeoffDataByScheme,
 } = require("../services/scoringService");
 
 router.get("/", (req, res) => {
@@ -127,6 +132,55 @@ router.post("/tradeoff-with-weights", (req, res) => {
 
   const data = getTradeoffData(customWeights);
   res.json(data);
+});
+
+router.get("/weight-schemes", (req, res) => {
+  const schemes = getWeightSchemes();
+  res.json(schemes);
+});
+
+router.post("/weight-schemes", (req, res) => {
+  const { name, weight, evasion, energy } = req.body;
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: "方案名称不能为空" });
+  }
+
+  const weights = {
+    weight: weight !== undefined ? Number(weight) : undefined,
+    evasion: evasion !== undefined ? Number(evasion) : undefined,
+    energy: energy !== undefined ? Number(energy) : undefined,
+  };
+
+  const result = createWeightScheme(name, weights);
+
+  if (result.error) {
+    return res.status(400).json({ error: result.error });
+  }
+
+  res.status(201).json(result);
+});
+
+router.delete("/weight-schemes/:id", (req, res) => {
+  const id = parseInt(req.params.id);
+  const result = deleteWeightScheme(id);
+
+  if (result.error) {
+    return res.status(404).json({ error: result.error });
+  }
+
+  res.json(result);
+});
+
+router.get("/tradeoff/by-scheme/:id", (req, res) => {
+  const id = parseInt(req.params.id);
+  const result = getTradeoffDataByScheme(id);
+
+  if (result.error) {
+    return res.status(404).json({ error: result.error });
+  }
+
+  res.json(result);
 });
 
 router.post("/batch-import", (req, res) => {
